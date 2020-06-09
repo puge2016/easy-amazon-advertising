@@ -69,7 +69,7 @@ class BaseClient
     {
         $this->getClient();
         $this->app = $app;
-        $this->requestId = time() . '-' . rand();
+        $this->requestId = time().'-'.rand();
         $this->config = $app['config']->toArray();
         $this->validateConfigParameters($this->config);
         $this->setEndpoint($this->config['region']);
@@ -140,7 +140,7 @@ class BaseClient
 
     public function setEndpoint(string $region)
     {
-        $this->apiEndpoint = isset(self::$apiEndpoints[$region]) ? self::$apiEndpoints[$region] . '/' . self::$apiVersion : '';
+        $this->apiEndpoint = isset(self::$apiEndpoints[$region]) ? self::$apiEndpoints[$region].'/'.self::$apiVersion : '';
         $this->apiNoVersionEndpoint = isset(self::$apiEndpoints[$region]) ? self::$apiEndpoints[$region] : '';
         $this->apiAuth = isset(self::$apiAuths[$region]) ? self::$apiAuths[$region] : '';
         self::$apiTokenUrl = isset(self::$apiTokenUrls[$region]) ? self::$apiTokenUrls[$region] : self::$apiTokenUrl;
@@ -161,7 +161,7 @@ class BaseClient
             'User-Agent' => 'AdvertisingAPI PHP Client Library v1.2',
         ];
         $params = [
-            'grant_type'    => 'refresh_token',
+            'grant_type' => 'refresh_token',
             'refresh_token' => $this->config['refreshToken'],
             'client_id' => $this->config['clientId'],
             'client_secret' => $this->config['clientSecret'],
@@ -181,11 +181,12 @@ class BaseClient
     public function getOAuthUrl()
     {
         $params = [
-            'client_id'     => $this->config['clientId'],
+            'client_id' => $this->config['clientId'],
             'response_type' => 'code',
-            'scope'         => 'cpc_advertising:campaign_management',
-            'redirect_uri'  => $this->config['redirect_uri'],
+            'scope' => 'cpc_advertising:campaign_management',
+            'redirect_uri' => $this->config['redirect_uri'],
         ];
+
         return [
             'success' => true,
             'code' => 200,
@@ -206,13 +207,13 @@ class BaseClient
     {
         $headers = [
             'Content-Type' => 'application/x-www-form-urlencoded',
-            'charset'      => 'UTF-8',
+            'charset' => 'UTF-8',
         ];
         $params = [
-            'grant_type'    => 'authorization_code',
-            'code'          => $this->config['code'],
-            'redirect_uri'  => $this->config['redirect_uri'],
-            'client_id'     => $this->config['clientId'],
+            'grant_type' => 'authorization_code',
+            'code' => $this->config['code'],
+            'redirect_uri' => $this->config['redirect_uri'],
+            'client_id' => $this->config['clientId'],
             'client_secret' => $this->config['clientSecret'],
         ];
 
@@ -399,7 +400,7 @@ class BaseClient
         $temp_file = $path_file.$data['reportId'].'.gz';
 
         $requestUrl = $isVersion ? $this->apiEndpoint : $this->apiNoVersionEndpoint;
-        $response = $this->client->get($requestUrl . $url, ['headers' => $headers, 'query' => [], 'save_to' => $temp_file]);
+        $response = $this->client->get($requestUrl.$url, ['headers' => $headers, 'query' => [], 'save_to' => $temp_file]);
         if (200 == $response->getStatusCode() && !empty(($report = $this->read_gz($temp_file)))) {
             $report = \GuzzleHttp\json_decode($report, true);
         } else {
@@ -499,7 +500,7 @@ class BaseClient
     }
 
     /**
-     * 返回一个匿名函数，该匿名函数返回下次重试的时间（毫秒）
+     * 返回一个匿名函数，该匿名函数返回下次重试的时间（毫秒）.
      *
      * @return \Closure
      *
@@ -514,7 +515,8 @@ class BaseClient
     }
 
     /**
-     * 返回一个匿名函数，判定是否重试
+     * 返回一个匿名函数，判定是否重试.
+     *
      * @return \Closure
      *
      * @author  baihe <b_aihe@163.com>
@@ -531,10 +533,11 @@ class BaseClient
             }
             if ($response) {
                 $status = $response->getStatusCode();
-                if ($status >= 500 || $status == 429) {
+                if ($status >= 500 || 429 == $status) {
                     return true;
                 }
             }
+
             return false;
         };
     }
