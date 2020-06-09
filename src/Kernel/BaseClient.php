@@ -4,8 +4,15 @@ namespace easyAmazonAdv\Kernel;
 
 use easyAmazonAdv\Kernel\Exceptions\InvalidArgumentException;
 use easyAmazonAdv\Kernel\Exceptions\InvalidConfigException;
+use GuzzleHttp\Psr7\Request;
+use GuzzleHttp\Psr7\Response;
 use GuzzleHttp\Client;
 use Exception;
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\Handler\CurlHandler;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
 
 class BaseClient
 {
@@ -32,11 +39,9 @@ class BaseClient
 //        'FE' => 'https://api.amazon.co.jp/auth/o2/token',
     ];
 
-
     public $config;
 
     protected static $apiVersion = 'v2';
-
 
     public $apiEndpoint;
 
@@ -50,6 +55,8 @@ class BaseClient
 
     public $requestId;
 
+    const MAX_RETRIES = 3;
+
     /**
      * BaseClient constructor.
      *
@@ -60,17 +67,25 @@ class BaseClient
      */
     public function __construct($app)
     {
-        $this->app       = $app;
+        $this->getClient();
+        $this->app = $app;
         $this->requestId = time() . '-' . rand();
-        $this->config    = $app['config']->toArray();
+        $this->config = $app['config']->toArray();
         $this->validateConfigParameters($this->config);
         $this->setEndpoint($this->config['region']);
         if (isset($app['client']->profileId) && !empty($app['client']->profileId)) {
             $this->profileId = $app['client']->profileId;
         }
-        if (empty($this->config['accessToken']) && !empty($this->config['refreshToken'])) {
-            $this->doRefreshToken();
-        }
+    }
+
+    public function getClient()
+    {
+        // 创建 Handler
+        $handlerStack = HandlerStack::create(new CurlHandler());
+        // 创建重试中间件，指定决策者为 $this->retryDecider(),指定重试延迟为 $this->retryDelay()
+        $handlerStack->push(Middleware::retry($this->retryDecider(), $this->retryDelay()));
+        // 指定 handler
+        $this->client = new Client(['handler' => $handlerStack]);
     }
 
     /**
@@ -111,7 +126,7 @@ class BaseClient
             if (!empty($config['refreshToken']) && !preg_match("/^Atzr(\||%7C|%7c).*$/", $config['refreshToken'])) {
                 throw new InvalidConfigException('Invalid parameter value for refreshToken.');
             }
-        }else{
+        } else {
             if (empty($config['redirect_uri'])) {
                 throw new InvalidConfigException('Missing required parameter redirect_uri');
             }
@@ -125,10 +140,10 @@ class BaseClient
 
     public function setEndpoint(string $region)
     {
-        $this->apiEndpoint          = isset(self::$apiEndpoints[$region]) ? self::$apiEndpoints[$region] . '/' . self::$apiVersion : '';
+        $this->apiEndpoint = isset(self::$apiEndpoints[$region]) ? self::$apiEndpoints[$region] . '/' . self::$apiVersion : '';
         $this->apiNoVersionEndpoint = isset(self::$apiEndpoints[$region]) ? self::$apiEndpoints[$region] : '';
-        $this->apiAuth              = isset(self::$apiAuths[$region]) ? self::$apiAuths[$region] : '';
-        self::$apiTokenUrl          = isset(self::$apiTokenUrls[$region]) ? self::$apiTokenUrls[$region] : self::$apiTokenUrl;
+        $this->apiAuth = isset(self::$apiAuths[$region]) ? self::$apiAuths[$region] : '';
+        self::$apiTokenUrl = isset(self::$apiTokenUrls[$region]) ? self::$apiTokenUrls[$region] : self::$apiTokenUrl;
     }
 
     /**
@@ -145,14 +160,14 @@ class BaseClient
             'Content-Type' => 'application/x-www-form-urlencoded',
             'User-Agent'   => 'AdvertisingAPI PHP Client Library v1.2',
         ];
-        $params  = [
+        $params = [
             'grant_type'    => 'refresh_token',
             'refresh_token' => $this->config['refreshToken'],
             'client_id'     => $this->config['clientId'],
             'client_secret' => $this->config['clientSecret'],
         ];
 
-        return $this->request(self::$apiTokenUrl, 'POST', ['form_params' => $params, 'headers' => $headers]);
+        return $this->request(self::$apiTokenUrl, 'POST', ['form_params' => $params, 'headers' => $headers, 'timeout' => 15]);
     }
 
     /**
@@ -166,10 +181,10 @@ class BaseClient
     public function getOAuthUrl()
     {
         $params = [
-            'client_id'         => $this->config['clientId'],
-            'response_type'     => 'code',
-            'scope'             => 'cpc_advertising:campaign_management',
-            'redirect_uri'      => $this->config['redirect_uri'],
+            'client_id'     => $this->config['clientId'],
+            'response_type' => 'code',
+            'scope'         => 'cpc_advertising:campaign_management',
+            'redirect_uri'  => $this->config['redirect_uri'],
         ];
         return [
             'success'   => true,
@@ -190,17 +205,18 @@ class BaseClient
     public function OAuth()
     {
         $headers = [
-            'Content-Type'  => 'application/x-www-form-urlencoded',
-            'charset'       => 'UTF-8',
+            'Content-Type' => 'application/x-www-form-urlencoded',
+            'charset'      => 'UTF-8',
         ];
-        $params  = [
+        $params = [
             'grant_type'    => 'authorization_code',
             'code'          => $this->config['code'],
             'redirect_uri'  => $this->config['redirect_uri'],
             'client_id'     => $this->config['clientId'],
             'client_secret' => $this->config['clientSecret'],
         ];
-        return $this->request(self::$apiTokenUrl, 'POST', ['form_params' => $params, 'headers' => $headers]);
+
+        return $this->request(self::$apiTokenUrl, 'POST', ['form_params' => $params, 'headers' => $headers, 'timeout' => 15]);
     }
 
     /**
@@ -217,19 +233,17 @@ class BaseClient
      */
     public function request(string $url, string $requestType, array $options)
     {
-        $client = new Client();
-
         try {
             $this->sendWriteLog($this->requestId, $requestType, $url, $options, []);
-            $response = $client->request($requestType, $url, $options);
+            $response = $this->client->request($requestType, $url, $options);
             $httpCode = $response->getStatusCode();
-            $message  = \GuzzleHttp\json_decode($response->getBody(), true);
+            $message = \GuzzleHttp\json_decode($response->getBody(), true);
             if (!empty($response->getHeader('x-amz-request-id'))) {
                 $requestId = $response->getHeader('x-amz-request-id')[0];
             }
         } catch (Exception $exception) {
             $httpCode = $exception->getCode();
-            $message  = $exception->getMessage();
+            $message = $exception->getMessage();
         }
         $this->sendWriteLog($this->requestId, $requestType, $url, [], $message);
 
@@ -384,9 +398,8 @@ class BaseClient
         }
         $temp_file = $path_file . $data['reportId'] . '.gz';
 
-        $client     = new Client();
         $requestUrl = $isVersion ? $this->apiEndpoint : $this->apiNoVersionEndpoint;
-        $response   = $client->get($requestUrl . $url, ['headers' => $headers, 'query' => [], 'save_to' => $temp_file]);
+        $response = $this->client->get($requestUrl . $url, ['headers' => $headers, 'query' => [], 'save_to' => $temp_file]);
 
         if (200 == $response->getStatusCode() && !empty(($report = $this->read_gz($temp_file)))) {
             $report = \GuzzleHttp\json_decode($report, true);
@@ -479,5 +492,46 @@ class BaseClient
             'request'   => $options,
             'response'  => $message,
         ]);
+    }
+
+    /**
+     * 返回一个匿名函数，该匿名函数返回下次重试的时间（毫秒）
+     *
+     * @return \Closure
+     *
+     * @author  baihe <b_aihe@163.com>
+     * @date    2020-06-09 17:40
+     */
+    protected function retryDelay()
+    {
+        return function ($numberOfRetries) {
+            return 2000 * $numberOfRetries;
+        };
+    }
+
+    /**
+     * 返回一个匿名函数，判定是否重试
+     * @return \Closure
+     *
+     * @author  baihe <b_aihe@163.com>
+     * @date    2020-06-09 17:40
+     */
+    protected function retryDecider()
+    {
+        return function ($retries, Request $request, Response $response = null, RequestException $exception = null) {
+            if ($retries >= self::MAX_RETRIES) {
+                return false;
+            }
+            if ($exception instanceof ConnectException) {
+                return true;
+            }
+            if ($response) {
+                $status = $response->getStatusCode();
+                if ($status >= 500 || $status == 429) {
+                    return true;
+                }
+            }
+            return false;
+        };
     }
 }
