@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/amazon-advertising.iml" filepath="$PROJECT_DIR$/.idea/amazon-advertising.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/easy-amazon-advertising.iml" filepath="$PROJECT_DIR$/.idea/easy-amazon-advertising.iml" />
     </modules>
   </component>
 </project>
